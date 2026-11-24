@@ -36,6 +36,7 @@
 .cproject
 .project
 .settings/*
+.idea/
 
 # Build artifacts
 build/*
