@@ -44,6 +44,10 @@ vendor/local/*
 src/rust/.cargo/config
 src/version.h
 
+# CI artifacts (see ci/build-deps.sh and ci/build-and-bench.sh)
+.ci-deps/
+ci-results/
+
 # Excel temporary files
 .~lock.*#
 *.tmp

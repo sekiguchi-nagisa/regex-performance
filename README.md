@@ -163,6 +163,30 @@ single engine is measured without building all of them:
 ./src/regex_perf -f ./3200.txt -e srell -p 'Twain' -p '\p{Sm}'
 ```
 
+## Continuous integration
+
+`.github/workflows/benchmark-ci.yml` builds the QuickJS, Boost.Regex, Hermes, PCRE2, SRELL and
+Node.js engines, links them into `regex_perf`, and runs the benchmark on `3200.txt` to verify that
+all of them can be measured. It runs every Monday at 03:00 UTC and can be started manually with
+*Run workflow*.
+
+The two scripts used by the workflow can also be run locally:
+
+```bash
+# build the engines at their pinned revisions into ./.ci-deps
+ci/build-deps.sh
+
+# build regex_perf from those dependencies, run the benchmark and check the CSV
+ci/build-and-bench.sh
+```
+
+`ci/build-deps.sh` is incremental: engines whose build artifacts already exist are skipped, which
+is also how the workflow reuses its dependency cache. The revisions are pinned with the
+`QUICKJS_REF`, `SRELL_REF`, `PCRE2_REF`, `HERMES_REF` and `BOOST_VERSION` environment variables, so
+a newer engine can be tried without editing the script. `ci/build-and-bench.sh` writes
+`ci-results/results.csv` and `ci-results/benchmark.log`, and fails if one of the six engines is
+missing from the binary or was not measured at all. Both directories are git-ignored.
+
 ## Memory measurement
 
 Every adapter that links the engine into the benchmark executable also reports the heap usage of
