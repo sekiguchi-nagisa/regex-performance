@@ -47,7 +47,7 @@ jobs:
             python3
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 26
 
@@ -63,7 +63,7 @@ jobs:
       # changes whenever a pinned revision or the build script changes; a restored cache lets
       # ci/build-deps.sh skip the engines that are already built.
       - name: Restore dependency cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.DEPS_DIR }}
           key: regex-perf-deps-${{ runner.os }}-qjs-${{ env.QUICKJS_REF }}-srell-${{ env.SRELL_REF }}-pcre2-${{ env.PCRE2_REF }}-hermes-${{ env.HERMES_REF }}-boost-${{ env.BOOST_VERSION }}-${{ hashFiles('ci/build-deps.sh') }}
@@ -85,7 +85,7 @@ jobs:
 
       - name: Upload results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: benchmark-results
           path: |
