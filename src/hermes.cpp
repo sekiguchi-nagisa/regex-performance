@@ -197,8 +197,11 @@ extern "C" int hermes_find_all(char *pattern, char *subject, int subject_len, in
         return -1;
     }
     const auto bytecode = regex.compile();
-    /* the compiled bytecode is what the engine keeps for execution */
-    res->mem_instance = memory_tracker_live() - memBase;
+    /* the compiled bytecode is what the engine keeps for execution. The tracker only observes the
+     * heap, so the parts of the instance which live in this frame (the compiler object with its
+     * syntax tree and the bytecode vector itself, both alive during the scan) are added
+     * explicitly. */
+    res->mem_instance = memory_tracker_live() - memBase + sizeof(regex) + sizeof(bytecode);
 
     /* decode the subject once; the conversion is not part of the measured region */
     const bool ascii = isAllASCII(subject, subject_len);

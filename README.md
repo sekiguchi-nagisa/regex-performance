@@ -189,10 +189,10 @@ missing from the binary or was not measured at all. Both directories are git-ign
 
 ## Memory measurement
 
-Every adapter that links the engine into the benchmark executable also reports the heap usage of
-its own work, split into two numbers:
+Every adapter that links the engine into the benchmark executable also reports the memory usage
+of its own work, split into two numbers:
 
-* `instance`: the live bytes of the compiled regex instance.
+* `instance`: the memory held by the compiled regex instance.
 * `runtime`: the peak extra bytes allocated while scanning the input.
 
 The numbers are printed next to the timings and written to the CSV (`<engine> [mem_inst]` and
@@ -215,6 +215,22 @@ res->mem_runtime = memory_tracker_peak() - scan_base;
 The tracker is enabled on glibc (Linux) and is a no-op elsewhere, in which case both numbers stay
 `0`. It tracks heap allocations only: memory obtained directly from the OS (e.g. `mmap`) or held
 on the stack is not included. The Node.js engine runs in another process, so its columns are `0`.
+
+Because the tracker only observes the heap, an engine that keeps its compiled regex in an object
+on the stack would report only the buffers that object owns and under-state the instance. The
+`cppstd`, `boost`, `srell` and `hermes` adapters therefore add the in-frame object to the heap
+delta, so `instance` is the full size of the compiled regex:
+
+```c++
+/* cppstd.cpp / boost.cpp / srell.cpp */
+res->mem_instance = memory_tracker_live() - base + sizeof(rx);
+
+/* hermes.cpp: the compiler object keeps its syntax tree until the scan is over */
+res->mem_instance = memory_tracker_live() - base + sizeof(regex) + sizeof(bytecode);
+```
+
+The QuickJS adapter needs no such term: `lre_compile` returns a heap block and the adapter keeps
+only a raw pointer to it, so the heap delta is the whole instance.
 
 ## Spreadsheet generator
 

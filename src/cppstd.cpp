@@ -23,7 +23,9 @@ extern "C" int cppstd_find_all(char* pattern, char* subject, int subject_len, in
     const size_t mem_base = memory_tracker_live();
     try {
         std::regex rx(pattern,std::regex::optimize);//|std::regex::extended);
-        res->mem_instance = memory_tracker_live() - mem_base;
+        /* the compiled regex instance. The tracker only observes the heap, so the part of the
+         * instance which lives in this frame (the regex object itself) is added explicitly. */
+        res->mem_instance = memory_tracker_live() - mem_base + sizeof(rx);
         std::string text( subject, subject_len );
 
         double * times = (double*) std::calloc(repeat, sizeof(double));

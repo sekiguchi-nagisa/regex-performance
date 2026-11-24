@@ -212,7 +212,9 @@ extern int quickjs_find_all(char *pattern, char *subject, int subject_len, int r
         printf("QuickJS compilation failed: %s (%s)\n", pattern, errMsg);
         return -1;
     }
-    /* the compiled bytecode is the regex instance (lre_exec keeps no per-instance state) */
+    /* The compiled bytecode is the regex instance (lre_exec keeps no per-instance state). Unlike
+     * the C++ adapters, the adapter only keeps a raw pointer to it in this frame, so the whole
+     * instance is the heap block and the heap delta already covers it. */
     res->mem_instance = memory_tracker_live() - memBase;
 
     /* decode the subject once; the conversion is not part of the measured region */

@@ -51,8 +51,10 @@ extern "C" int srell_find_all(char *pattern, char *subject, int subject_len, int
   const size_t memBase = memory_tracker_live();
   try {
     srell::u8cregex rx(pattern, srell::regex_constants::optimize);
-    /* the compiled regex instance (SRELL keeps the compiled program inside the object) */
-    res->mem_instance = memory_tracker_live() - memBase;
+    /* the compiled regex instance (SRELL keeps the compiled program inside the object). The
+     * tracker only observes the heap, so the part of the instance which lives in this frame (the
+     * regex object itself) is added explicitly. */
+    res->mem_instance = memory_tracker_live() - memBase + sizeof(rx);
     const std::string text(subject, static_cast<size_t>(subject_len));
 
     double *times = static_cast<double *>(calloc(static_cast<size_t>(repeat), sizeof(double)));
