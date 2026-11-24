@@ -1,5 +1,5 @@
 # Regex Performance
-[![Build Status](https://travis-ci.org/rust-leipzig/regex-performance.svg?branch=master)](https://travis-ci.org/rust-leipzig/regex-performance)
+[![Actions Status](https://github.com/sekiguchi-nagisa/regex-performance/workflows/benchmark-ci.yml/badge.svg)](https://github.com/sekiguchi-nagisa/regex-performance/actions/benchmark-ci.yml)
 
 ## Introduction
 Regular expressions are commonly used in pattern search algorithms.
