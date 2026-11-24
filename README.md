@@ -1,5 +1,5 @@
 # Regex Performance
-[![Actions Status](https://github.com/sekiguchi-nagisa/regex-performance/workflows/benchmark-ci.yml/badge.svg)](https://github.com/sekiguchi-nagisa/regex-performance/actions/workflows/benchmark-ci.yml)
+[![Actions Status](https://github.com/sekiguchi-nagisa/regex-performance/actions/workflows/benchmark-ci.yml/badge.svg)](https://github.com/sekiguchi-nagisa/regex-performance/actions/workflows/benchmark-ci.yml)
 
 ## Introduction
 Regular expressions are commonly used in pattern search algorithms.
