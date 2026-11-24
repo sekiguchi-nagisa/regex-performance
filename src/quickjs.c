@@ -29,6 +29,7 @@
  */
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,6 +58,23 @@ void *lre_realloc(void *opaque, void *ptr, size_t size) {
         return NULL;
     }
     return realloc(ptr, size);
+}
+
+/**
+ * The hash key of the character-class string table (used by the `v` flag sets, e.g. `[\q{a|b}]`).
+ * Newer libregexp versions derive it from the host, because a pattern can be crafted to make the
+ * compilation slow unless the key is random and secret. The benchmark compiles trusted patterns,
+ * so a fixed key is enough; see libregexp.h.
+ */
+const uint64_t *lre_hash_key(void *opaque) {
+    static const uint64_t key[4] = {
+            0x243f6a8885a308d3ULL,
+            0x13198a2e03707344ULL,
+            0xa4093822299f31d0ULL,
+            0x082efa98ec4e6c89ULL,
+    };
+    (void)opaque;
+    return key;
 }
 
 static const char *skipInlineFlags(const char *pattern, int *flags) {
