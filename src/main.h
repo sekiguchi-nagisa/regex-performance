@@ -37,6 +37,10 @@ struct result {
     long memory_rss_peak_kb;  // Peak resident set size
     long memory_start_kb;     // Baseline memory before execution
     long memory_delta_kb;     // Memory increase during execution
+
+    // heap accounting from memory_tracker.h (0 if the engine does not report it)
+    size_t mem_instance;  // live bytes of the compiled regex instance
+    size_t mem_runtime;   // peak extra bytes allocated while scanning the input
 };
 
 void get_mean_and_derivation(double * times, uint32_t times_len, struct result * res);
@@ -58,8 +62,7 @@ int boost_find_all(char* pattern, char* subject, int subject_len, int repeat, st
 int cppstd_find_all(char* pattern, char* subject, int subject_len, int repeat, struct result * res);
 #endif
 #ifdef INCLUDE_PCRE2
-int pcre2_std_find_all(char* pattern, char* subject, int subject_len, int repeat, struct result * res);
-int pcre2_dfa_find_all(char* pattern, char* subject, int subject_len, int repeat, struct result * res);
+int pcre2_find_all(char* pattern, char* subject, int subject_len, int repeat, struct result * res);
 int pcre2_jit_find_all(char* pattern, char* subject, int subject_len, int repeat, struct result * res);
 #endif
 #ifdef INCLUDE_RE2
@@ -77,8 +80,26 @@ int hs_find_all(char * pattern, char * subject, int subject_len, int repeat, str
 #ifdef INCLUDE_YARA
 int yara_find_all(char * pattern, char * subject, int subject_len, int repeat, struct result * res);
 #endif
+#ifdef INCLUDE_RUST
 int rust_find_all(char * pattern, char * subject, int subject_len, int repeat, struct result * res);
 int regress_find_all(char * pattern, char * subject, int subject_len, int repeat, struct result * res);
+#endif
+#ifdef INCLUDE_ARSH
+int arsh_find_all(char * pattern, char * subject, int subject_len, int repeat, struct result * res);
+int arsh_unopt_find_all(char * pattern, char * subject, int subject_len, int repeat, struct result * res);
+#endif
+#ifdef INCLUDE_SRELL
+int srell_find_all(char * pattern, char * subject, int subject_len, int repeat, struct result * res);
+#endif
+#ifdef INCLUDE_QUICKJS
+int quickjs_find_all(char * pattern, char * subject, int subject_len, int repeat, struct result * res);
+#endif
+#ifdef INCLUDE_HERMES
+int hermes_find_all(char * pattern, char * subject, int subject_len, int repeat, struct result * res);
+#endif
+#ifdef INCLUDE_NODEJS
+int nodejs_find_all(char * pattern, char * subject, int subject_len, int repeat, struct result * res);
+#endif
 
 #ifdef __cplusplus
 }

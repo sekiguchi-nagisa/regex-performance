@@ -46,11 +46,30 @@ The following regex engines are supported and covered by the tool:
 - [Boost regex](https://www.boost.org/doc/libs/1_78_0/libs/regex/doc/html/index.html)
 - [C++ Standard regex](https://en.cppreference.com/w/cpp/regex)
 - [YARA](https://github.com/VirusTotal/yara)
+- [SRELL](https://github.com/upa-url/srell)
+- [QuickJS libregexp](https://github.com/quickjs-ng/quickjs)
+- [Hermes](https://github.com/facebook/hermes)
+- [Node.js (V8)](https://nodejs.org)
 
 The engines are built from their sources. In the case an installed engine should be used,
 the corresponding cmake variable `INCLUDE_<name>` has to be set to `system`. The configuration script
 tries to locate the library and uses the library for linking the benchmark.
 The same variable can be set to `disabled` to exclude an engine.
+
+SRELL, QuickJS, Hermes and the Node.js engine are ECMAScript-compatible Unicode engines, so they
+are the closest comparison targets for an ECMAScript-style engine. They are disabled by default
+because they need an external source/build tree or an installed `node`:
+
+| variable | meaning |
+|----------|---------|
+| `INCLUDE_SRELL=local` + `SRELL_SOURCE_DIR` | directory that contains `srell.hpp` (the `single-header` variant) |
+| `INCLUDE_QUICKJS=local` + `QUICKJS_SOURCE_DIR` | QuickJS tree that contains `libregexp.c` |
+| `INCLUDE_HERMES=local` + `HERMES_SOURCE_DIR` / `HERMES_BUILD_DIR` | Hermes source tree and the CMake build that contains `lib/Regex/libhermesRegex.a` |
+| `INCLUDE_NODEJS=local` + `NODEJS_EXECUTABLE` | the `node` executable (looked up on `PATH` by `find_program`) |
+| `INCLUDE_PCRE2=local` + `PCRE2_BUILD_DIR` | a PCRE2 build with `libpcre2-8.a` and JIT support |
+
+The Node.js engine runs out of process, so its memory columns stay `0`. See "Memory measurement"
+below for the in-process heap numbers.
 
 The configuration script distinguishes between nightly and other Rust toolchains to enable the SIMD-feature
 which is currently available in the nightly built only. The SIMD-feature improves the throughput of the
@@ -134,6 +153,44 @@ You can specify a file to write the test results per expression and engine:
 ./src/regex_perf -f ./3200.txt -o ./results.csv
 ```
 The test tool writes the results in a csv-compatible format.
+
+`-e NAME` restricts the measured engines and `-p PATTERN` replaces the built-in pattern set; both
+can be repeated, and `-h` lists the available engine names. Naming an engine with `-e` is also how a
+single engine is measured without building all of them:
+
+```bash
+./src/regex_perf -f ./3200.txt -e pcre-jit -e srell
+./src/regex_perf -f ./3200.txt -e srell -p 'Twain' -p '\p{Sm}'
+```
+
+## Memory measurement
+
+Every adapter that links the engine into the benchmark executable also reports the heap usage of
+its own work, split into two numbers:
+
+* `instance`: the live bytes of the compiled regex instance.
+* `runtime`: the peak extra bytes allocated while scanning the input.
+
+The numbers are printed next to the timings and written to the CSV (`<engine> [mem_inst]` and
+`<engine> [mem_run]` columns). `memory_tracker.cpp` provides them by replacing the global
+malloc/calloc/realloc/free and C++ operator new/delete and accounting every live block by its
+usable size. Because all engines are linked into the same executable, each adapter measures a
+delta around its own work:
+
+```c
+const size_t base = memory_tracker_live();
+/* build the compiled regex */
+res->mem_instance = memory_tracker_live() - base;
+
+memory_tracker_reset_peak();
+const size_t scan_base = memory_tracker_live();
+/* run all the matches */
+res->mem_runtime = memory_tracker_peak() - scan_base;
+```
+
+The tracker is enabled on glibc (Linux) and is a no-op elsewhere, in which case both numbers stay
+`0`. It tracks heap allocations only: memory obtained directly from the OS (e.g. `mmap`) or held
+on the stack is not included. The Node.js engine runs in another process, so its columns are `0`.
 
 ## Spreadsheet generator
 

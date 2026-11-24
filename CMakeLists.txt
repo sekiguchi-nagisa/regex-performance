@@ -39,11 +39,19 @@ endif()
 # Receive the current version from git
 execute_process(COMMAND git describe --tags
                 OUTPUT_VARIABLE GIT_TAG_VERSION
+                ERROR_QUIET
                 OUTPUT_STRIP_TRAILING_WHITESPACE)
 
-string(REGEX REPLACE "([0-9]+)\\.([0-9]+)\\.([0-9]+).*" "\\1" MAJOR_VERSION_GIT ${GIT_TAG_VERSION})
-string(REGEX REPLACE "([0-9]+)\\.([0-9]+)\\.([0-9]+).*" "\\2" MINOR_VERSION_GIT ${GIT_TAG_VERSION})
-string(REGEX REPLACE "([0-9]+)\\.([0-9]+)\\.([0-9]+).*" "\\3" PATCH_VERSION_GIT ${GIT_TAG_VERSION})
+# a checkout without tags (e.g. a shallow clone) yields no version, so fall back to 0.0.0
+if(GIT_TAG_VERSION MATCHES "([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+    set(MAJOR_VERSION_GIT "${CMAKE_MATCH_1}")
+    set(MINOR_VERSION_GIT "${CMAKE_MATCH_2}")
+    set(PATCH_VERSION_GIT "${CMAKE_MATCH_3}")
+else()
+    set(MAJOR_VERSION_GIT "0")
+    set(MINOR_VERSION_GIT "0")
+    set(PATCH_VERSION_GIT "0")
+endif()
 
 # Write default version numbers. Values can be overwritten on command line.
 set(MAJOR_VERSION "${MAJOR_VERSION_GIT}" CACHE STRING "major version")

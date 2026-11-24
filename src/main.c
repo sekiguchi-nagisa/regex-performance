@@ -16,6 +16,9 @@ static int data_len = 0;
 // Global timeout setting (default 1 second)
 double timeout_ms = 1000.0;
 
+/* maximum number of engines / patterns selectable with -e / -p */
+#define SELECT_MAX 64
+
 struct engines {
     char * name;
     int (*find_all)(char* pattern, char* subject, int subject_len, int repeat, struct result * result);
@@ -32,8 +35,7 @@ static struct engines engines [] = {
     {.name = "cppstd",        .find_all = cppstd_find_all},
 #endif
 #ifdef INCLUDE_PCRE2
-    {.name = "pcre",        .find_all = pcre2_std_find_all},
-    {.name = "pcre-dfa",    .find_all = pcre2_dfa_find_all},
+    {.name = "pcre",        .find_all = pcre2_find_all},
     {.name = "pcre-jit",    .find_all = pcre2_jit_find_all},
 #endif
 #ifdef INCLUDE_RE2
@@ -51,11 +53,30 @@ static struct engines engines [] = {
 #ifdef INCLUDE_YARA
     {.name = "yara",        .find_all = yara_find_all},
 #endif
+#ifdef INCLUDE_RUST
     {.name = "rust_regex",  .find_all = rust_find_all},
     {.name = "rust_regrs",  .find_all = regress_find_all},
+#endif
+#ifdef INCLUDE_ARSH
+    {.name = "arsh",        .find_all = arsh_find_all},
+    {.name = "arsh-unopt",  .find_all = arsh_unopt_find_all},
+#endif
+#ifdef INCLUDE_SRELL
+    {.name = "srell",       .find_all = srell_find_all},
+#endif
+#ifdef INCLUDE_QUICKJS
+    {.name = "quickjs",     .find_all = quickjs_find_all},
+#endif
+#ifdef INCLUDE_HERMES
+    {.name = "hermes",      .find_all = hermes_find_all},
+#endif
+#ifdef INCLUDE_NODEJS
+    {.name = "nodejs",      .find_all = nodejs_find_all},
+#endif
 };
 
-static char * regex [] = {
+/* the built-in pattern set, measured when no -p option is given */
+static char * default_regex [] = {
     "Twain",
     "(?i)Twain",
     "[a-z]shing",
@@ -75,6 +96,37 @@ static char * regex [] = {
     "\\p{Sm}",                               // any mathematical symbol
     "(.*?,){13}z"
 };
+
+/* patterns given with -p (repeatable). the built-in set is used when empty */
+static char * patterns [SELECT_MAX];
+static int pattern_count = 0;
+
+/* engines selected with -e (repeatable). every registered engine is used when empty */
+static struct engines * selected_engines [SELECT_MAX];
+static int selected_engine_count = 0;
+
+static struct engines * find_engine(char const * name)
+{
+    int iter;
+
+    for (iter = 0; iter < sizeof(engines)/sizeof(engines[0]); iter++) {
+        if (strcmp(engines[iter].name, name) == 0) {
+            return &engines[iter];
+        }
+    }
+    return NULL;
+}
+
+static void print_engines(FILE * f)
+{
+    int iter;
+
+    fprintf(f, "available engines:");
+    for (iter = 0; iter < sizeof(engines)/sizeof(engines[0]); iter++) {
+        fprintf(f, " %s", engines[iter].name);
+    }
+    fputc('\n', f);
+}
 
 void cleanup_data(void)
 {
@@ -163,19 +215,21 @@ void find_all(char* pattern, char* subject, int subject_len, int repeat, struct 
 
     fprintf(stdout, "-----------------\nRegex: '%s'\n", pattern);
 
-    for (iter = 0; iter < sizeof(engines)/sizeof(engines[0]); iter++) {
+    for (iter = 0; iter < selected_engine_count; iter++) {
+        struct engines * engine = selected_engines[iter];
+
         // Warmup for JIT engines
-        if (needs_warmup(engines[iter].name)) {
+        if (needs_warmup(engine->name)) {
             struct result warmup_result = {0};
             int warmup_cycles = 3;
-            engines[iter].find_all(pattern, subject, subject_len, warmup_cycles, &warmup_result);
+            engine->find_all(pattern, subject, subject_len, warmup_cycles, &warmup_result);
             // Warmup result is discarded
         }
 
         // Record baseline memory before engine execution
         record_memory_baseline(&(engine_results[iter]));
 
-        int ret = engines[iter].find_all(pattern, subject, subject_len, repeat, &(engine_results[iter]));
+        int ret = engine->find_all(pattern, subject, subject_len, repeat, &(engine_results[iter]));
 
         // Record peak memory after engine execution
         record_memory_peak(&(engine_results[iter]));
@@ -188,6 +242,8 @@ void find_all(char* pattern, char* subject, int subject_len, int repeat, struct 
             engine_results[iter].matches = 0;
             engine_results[iter].score = 0;
             engine_results[iter].samples_used = 0;
+            engine_results[iter].mem_instance = 0;
+            engine_results[iter].mem_runtime = 0;
             // Memory fields are already set by record_memory_peak
         } else if (ret == -2) {
             // Timeout occurred
@@ -198,9 +254,11 @@ void find_all(char* pattern, char* subject, int subject_len, int repeat, struct 
             engine_results[iter].matches = -1; // Indicate timeout
             engine_results[iter].score = 0;
             engine_results[iter].samples_used = 0;
-            printf("[%10s] time: TIMEOUT (>%.1f ms)\n", engines[iter].name, timeout_ms);
+            engine_results[iter].mem_instance = 0;
+            engine_results[iter].mem_runtime = 0;
+            printf("[%10s] time: TIMEOUT (>%.1f ms)\n", engine->name, timeout_ms);
         } else {
-            printResult(engines[iter].name, &(engine_results[iter]));
+            printResult(engine->name, &(engine_results[iter]));
         }
     }
 
@@ -210,7 +268,7 @@ void find_all(char* pattern, char* subject, int subject_len, int repeat, struct 
     for (int top = 0; top < score_points; top++) {
         double best = 0;
 
-        for (iter = 0; iter < sizeof(engines)/sizeof(engines[0]); iter++) {
+        for (iter = 0; iter < selected_engine_count; iter++) {
             if (engine_results[iter].time > 0 &&
                 engine_results[iter].score == 0 &&
                 (best == 0 || best > engine_results[iter].time)) {
@@ -218,7 +276,7 @@ void find_all(char* pattern, char* subject, int subject_len, int repeat, struct 
             }
         }
 
-        for (iter = 0; iter < sizeof(engines)/sizeof(engines[0]); iter++) {
+        for (iter = 0; iter < selected_engine_count; iter++) {
             if (engine_results[iter].time > 0 && best == engine_results[iter].time) {
                 engine_results[iter].score = score_points;
             }
@@ -391,10 +449,12 @@ void printResult(char * name, struct result * res)
         }
     }
 
-    fprintf(stdout, "[%10s] time: %7.1f ms [%6.1f-%6.1f] (±%4.1f%%)%s matches: %8d (n=%d)%s\n",
+    fprintf(stdout, "[%10s] time: %7.1f ms [%6.1f-%6.1f] (±%4.1f%%)%s matches: %8d (n=%d)%s"
+                    " mem: %8zu B instance + %8zu B runtime\n",
             name, res->time,
             res->confidence_95_lower, res->confidence_95_upper,
-            cv, memory_info, res->matches, res->samples_used, stability);
+            cv, memory_info, res->matches, res->samples_used, stability,
+            res->mem_instance, res->mem_runtime);
     fflush(stdout);
 }
 
@@ -521,7 +581,7 @@ int main(int argc, char **argv)
     int repeat = 5;
     int c = 0;
 
-    while ((c = getopt(argc, argv, "n:hvf:o:t:")) != -1) {
+    while ((c = getopt(argc, argv, "n:e:p:hvf:o:t:")) != -1) {
         switch (c) {
             case 'f':
                 file = optarg;
@@ -531,6 +591,36 @@ int main(int argc, char **argv)
                 break;
             case 'o':
                 out_file = optarg;
+                break;
+            case 'e': {
+                struct engines * engine = find_engine(optarg);
+                if (engine == NULL) {
+                    fprintf(stderr, "Unknown engine: '%s'\n", optarg);
+                    print_engines(stderr);
+                    exit(EXIT_FAILURE);
+                }
+                int iter;
+                for (iter = 0; iter < selected_engine_count; iter++) {
+                    if (selected_engines[iter] == engine) {
+                        break;
+                    }
+                }
+                if (iter < selected_engine_count) {
+                    break; /* already selected */
+                }
+                if (selected_engine_count == SELECT_MAX) {
+                    fprintf(stderr, "Too many -e options (max: %d).\n", SELECT_MAX);
+                    exit(EXIT_FAILURE);
+                }
+                selected_engines[selected_engine_count++] = engine;
+                break;
+            }
+            case 'p':
+                if (pattern_count == SELECT_MAX) {
+                    fprintf(stderr, "Too many -p options (max: %d).\n", SELECT_MAX);
+                    exit(EXIT_FAILURE);
+                }
+                patterns[pattern_count++] = optarg;
                 break;
             case 't':
                 timeout_ms = atof(optarg) * 1000.0; // Convert seconds to milliseconds
@@ -547,10 +637,13 @@ int main(int argc, char **argv)
                 printf("Options:\n");
                 printf("  -f\tInput file.\n");
                 printf("  -n\tSet number of repetitions. Default: 5\n");
+                printf("  -e\tBenchmark only the specified engine. Can be repeated.\n");
+                printf("  -p\tBenchmark only the specified pattern. Can be repeated.\n");
                 printf("  -o\tWrite measured data into CSV file.\n");
                 printf("  -t\tSet timeout in seconds. Default: 1.0\n");
                 printf("  -v\tGet the application version and build date.\n");
                 printf("  -h\tPrint this help message\n\n");
+                print_engines(stdout);
                 exit(EXIT_SUCCESS);
         }
     }
@@ -568,36 +661,70 @@ int main(int argc, char **argv)
     // Register cleanup function for proper memory management
     atexit(cleanup_data);
 
-    struct result results[sizeof(regex)/sizeof(regex[0])][sizeof(engines)/sizeof(engines[0])] = {0};
-    struct result engine_results[sizeof(engines)/sizeof(engines[0])] = {0};
+    /* number of enabled engines. keep at least 1 so the arrays stay valid even if
+       every engine is disabled (the binary then only prints a warning). */
+    enum { ENGINE_COUNT = sizeof(engines) / sizeof(engines[0]) };
+    enum { RESULT_COLS = ENGINE_COUNT ? ENGINE_COUNT : 1 };
+    if (ENGINE_COUNT == 0) {
+        fprintf(stderr, "No regex engine is enabled.\n");
+    }
+
+    /* without -e/-p, every registered engine and the built-in pattern set is measured */
+    if (selected_engine_count == 0) {
+        for (int iter = 0; iter < ENGINE_COUNT; iter++) {
+            selected_engines[selected_engine_count++] = &engines[iter];
+        }
+    }
+    if (pattern_count == 0) {
+        for (int iter = 0; iter < (int) (sizeof(default_regex)/sizeof(default_regex[0])); iter++) {
+            patterns[pattern_count++] = default_regex[iter];
+        }
+    }
+
+    /* the number of selected patterns is only known at runtime, so keep the table
+       in the heap */
+    struct result * results = calloc((size_t) pattern_count * RESULT_COLS, sizeof(struct result));
+    struct result engine_results[RESULT_COLS] = {0};
+    if (results == NULL) {
+        fprintf(stderr, "Cannot allocate memory!\n");
+        exit(EXIT_FAILURE);
+    }
     int total_validation_errors = 0;
 
-    for (int iter = 0; iter < sizeof(regex)/sizeof(regex[0]); iter++) {
-        find_all(regex[iter], data, data_len, repeat, results[iter]);
+    /* the engine names of the current selection, used for validation */
+    char * engine_names[RESULT_COLS] = {0};
+    for (int iter = 0; iter < selected_engine_count; iter++) {
+        engine_names[iter] = selected_engines[iter]->name;
+    }
+
+    for (int iter = 0; iter < pattern_count; iter++) {
+        struct result * row = &results[iter * RESULT_COLS];
+        find_all(patterns[iter], data, data_len, repeat, row);
 
         // Validate results for this pattern
-        char* engine_names[sizeof(engines)/sizeof(engines[0])];
-        for (int iiter = 0; iiter < sizeof(engines)/sizeof(engines[0]); iiter++) {
-            engine_names[iiter] = engines[iiter].name;
-        }
-        int errors = validate_results(regex[iter], results[iter], engine_names, sizeof(engines)/sizeof(engines[0]));
+        int errors = validate_results(patterns[iter], row, engine_names, selected_engine_count);
         total_validation_errors += errors;
 
-        for (int iiter = 0; iiter < sizeof(engines)/sizeof(engines[0]); iiter++) {
-            engine_results[iiter].time += results[iter][iiter].time;
-            engine_results[iiter].score += results[iter][iiter].score;
+        for (int iiter = 0; iiter < selected_engine_count; iiter++) {
+            engine_results[iiter].time += row[iiter].time;
+            engine_results[iiter].score += row[iiter].score;
+            engine_results[iiter].mem_instance += row[iiter].mem_instance;
+            engine_results[iiter].mem_runtime += row[iiter].mem_runtime;
         }
     }
 
     fprintf(stdout, "-----------------\nTotal Results:\n");
-    for (int iter = 0; iter < sizeof(engines)/sizeof(engines[0]); iter++) {
-        char memory_summary[32] = "";
+    for (int iter = 0; iter < selected_engine_count; iter++) {
+        char memory_summary[64] = "";
         if (engine_results[iter].memory_rss_peak_kb > 0) {
             snprintf(memory_summary, sizeof(memory_summary), ", mem: %ld kB",
                      engine_results[iter].memory_rss_peak_kb);
         }
-        fprintf(stdout, "[%10s] time:  %7.1f ms, score: %6u points%s\n",
-                engines[iter].name, engine_results[iter].time, engine_results[iter].score, memory_summary);
+        fprintf(stdout, "[%10s] time:  %7.1f ms, score: %6u points%s"
+                        " mem: %8zu B instance + %8zu B runtime\n",
+                selected_engines[iter]->name, engine_results[iter].time,
+                engine_results[iter].score, memory_summary,
+                engine_results[iter].mem_instance, engine_results[iter].mem_runtime);
     }
 
     // Print validation and stability summary
@@ -612,7 +739,7 @@ int main(int argc, char **argv)
     fprintf(stdout, "-----------------\nMeasurement Quality:\n");
     int unstable_engines = 0, noisy_engines = 0, variable_engines = 0, stable_engines = 0;
 
-    for (int iter = 0; iter < sizeof(engines)/sizeof(engines[0]); iter++) {
+    for (int iter = 0; iter < selected_engine_count; iter++) {
         if (engine_results[iter].time > 0) {
             double cv = (engine_results[iter].time_sd / engine_results[iter].time) * 100;
             if (cv > 30) unstable_engines++;
@@ -634,15 +761,16 @@ int main(int argc, char **argv)
     fprintf(stdout, "Memory vs Speed Analysis:\n");
 
     // Calculate average memory usage and speed across all regex patterns
-    double avg_memory[sizeof(engines)/sizeof(engines[0])] = {0};
-    double avg_time[sizeof(engines)/sizeof(engines[0])] = {0};
-    int valid_results[sizeof(engines)/sizeof(engines[0])] = {0};
+    double avg_memory[RESULT_COLS] = {0};
+    double avg_time[RESULT_COLS] = {0};
+    int valid_results[RESULT_COLS] = {0};
 
-    for (int e = 0; e < sizeof(engines)/sizeof(engines[0]); e++) {
-        for (int r = 0; r < sizeof(regex)/sizeof(regex[0]); r++) {
-            if (results[r][e].time > 0 && results[r][e].memory_peak_kb > 0) {
-                avg_memory[e] += results[r][e].memory_delta_kb;
-                avg_time[e] += results[r][e].time;
+    for (int e = 0; e < selected_engine_count; e++) {
+        for (int r = 0; r < pattern_count; r++) {
+            struct result * row = &results[r * RESULT_COLS];
+            if (row[e].time > 0 && row[e].memory_peak_kb > 0) {
+                avg_memory[e] += row[e].memory_delta_kb;
+                avg_time[e] += row[e].time;
                 valid_results[e]++;
             }
         }
@@ -656,7 +784,7 @@ int main(int argc, char **argv)
     int most_efficient = -1, fastest = -1;
     double min_memory = 1e9, min_time = 1e9;
 
-    for (int e = 0; e < sizeof(engines)/sizeof(engines[0]); e++) {
+    for (int e = 0; e < selected_engine_count; e++) {
         if (valid_results[e] > 0) {
             if (avg_memory[e] < min_memory) {
                 min_memory = avg_memory[e];
@@ -671,33 +799,33 @@ int main(int argc, char **argv)
 
     // Report memory efficiency rankings
     fprintf(stdout, "Memory Efficiency Rankings (avg delta KB):\n");
-    for (int e = 0; e < sizeof(engines)/sizeof(engines[0]); e++) {
+    for (int e = 0; e < selected_engine_count; e++) {
         if (valid_results[e] > 0) {
-            fprintf(stdout, "  %s: %.1f kB avg\n", engines[e].name, avg_memory[e]);
+            fprintf(stdout, "  %s: %.1f kB avg\n", selected_engines[e]->name, avg_memory[e]);
         }
     }
 
     fprintf(stdout, "Speed Rankings (avg ms):\n");
-    for (int e = 0; e < sizeof(engines)/sizeof(engines[0]); e++) {
+    for (int e = 0; e < selected_engine_count; e++) {
         if (valid_results[e] > 0) {
-            fprintf(stdout, "  %s: %.1f ms avg\n", engines[e].name, avg_time[e]);
+            fprintf(stdout, "  %s: %.1f ms avg\n", selected_engines[e]->name, avg_time[e]);
         }
     }
 
     if (most_efficient >= 0 && fastest >= 0) {
         fprintf(stdout, "\nSummary:\n");
         fprintf(stdout, "  Most memory efficient: %s (%.1f kB avg)\n",
-                engines[most_efficient].name, avg_memory[most_efficient]);
+                selected_engines[most_efficient]->name, avg_memory[most_efficient]);
         fprintf(stdout, "  Fastest: %s (%.1f ms avg)\n",
-                engines[fastest].name, avg_time[fastest]);
+                selected_engines[fastest]->name, avg_time[fastest]);
 
         if (most_efficient == fastest) {
             fprintf(stdout, "  %s wins both speed and memory efficiency!\n",
-                    engines[fastest].name);
+                    selected_engines[fastest]->name);
         } else {
             // Calculate memory/speed ratio for trade-off analysis
             fprintf(stdout, "  Trade-off: %s uses %.1fx more memory for %.1fx speed improvement\n",
-                    engines[fastest].name,
+                    selected_engines[fastest]->name,
                     avg_memory[fastest] / avg_memory[most_efficient],
                     avg_time[most_efficient] / avg_time[fastest]);
         }
@@ -715,35 +843,42 @@ int main(int argc, char **argv)
 
         /* write table header*/
         fprintf(f, "regex;");
-        for (iter = 0; iter < sizeof(engines)/sizeof(engines[0]); iter++) {
-            fprintf(f, "%s [ms];", engines[iter].name);
+        for (iter = 0; iter < selected_engine_count; iter++) {
+            fprintf(f, "%s [ms];", selected_engines[iter]->name);
         }
-        for (iter = 0; iter < sizeof(engines)/sizeof(engines[0]); iter++) {
-            fprintf(f, "%s [sp];", engines[iter].name);
+        for (iter = 0; iter < selected_engine_count; iter++) {
+            fprintf(f, "%s [sp];", selected_engines[iter]->name);
         }
-        for (iter = 0; iter < sizeof(engines)/sizeof(engines[0]); iter++) {
-            fprintf(f, "%s [matches];", engines[iter].name);
+        for (iter = 0; iter < selected_engine_count; iter++) {
+            fprintf(f, "%s [matches];", selected_engines[iter]->name);
         }
-        for (iter = 0; iter < sizeof(engines)/sizeof(engines[0]); iter++) {
-            fprintf(f, "%s [mem_kb];", engines[iter].name);
+        for (iter = 0; iter < selected_engine_count; iter++) {
+            fprintf(f, "%s [mem_inst];", selected_engines[iter]->name);
+        }
+        for (iter = 0; iter < selected_engine_count; iter++) {
+            fprintf(f, "%s [mem_run];", selected_engines[iter]->name);
         }
         fprintf(f, "\n");
 
         /* write data */
-        for (iter = 0; iter < sizeof(regex)/sizeof(regex[0]); iter++) {
-            fprintf(f, "%s;", regex[iter]);
+        for (iter = 0; iter < pattern_count; iter++) {
+            struct result * row = &results[iter * RESULT_COLS];
+            fprintf(f, "%s;", patterns[iter]);
 
-            for (iiter = 0; iiter < sizeof(engines)/sizeof(engines[0]); iiter++) {
-                fprintf(f, "%7.1f;", results[iter][iiter].time);
+            for (iiter = 0; iiter < selected_engine_count; iiter++) {
+                fprintf(f, "%7.1f;", row[iiter].time);
             }
-            for (iiter = 0; iiter < sizeof(engines)/sizeof(engines[0]); iiter++) {
-                fprintf(f, "%d;", results[iter][iiter].score);
+            for (iiter = 0; iiter < selected_engine_count; iiter++) {
+                fprintf(f, "%d;", row[iiter].score);
             }
-            for (iiter = 0; iiter < sizeof(engines)/sizeof(engines[0]); iiter++) {
-                fprintf(f, "%d;", results[iter][iiter].matches);
+            for (iiter = 0; iiter < selected_engine_count; iiter++) {
+                fprintf(f, "%d;", row[iiter].matches);
             }
-            for (iiter = 0; iiter < sizeof(engines)/sizeof(engines[0]); iiter++) {
-                fprintf(f, "%ld;", results[iter][iiter].memory_delta_kb);
+            for (iiter = 0; iiter < selected_engine_count; iiter++) {
+                fprintf(f, "%zu;", row[iiter].mem_instance);
+            }
+            for (iiter = 0; iiter < selected_engine_count; iiter++) {
+                fprintf(f, "%zu;", row[iiter].mem_runtime);
             }
             fprintf(f, "\n");
         }
@@ -751,7 +886,8 @@ int main(int argc, char **argv)
         fclose(f);
     }
 
-    free(data);
+    free(results);
 
+    /* the input buffer is released by cleanup_data(), which is registered with atexit */
     exit(EXIT_SUCCESS);
 }

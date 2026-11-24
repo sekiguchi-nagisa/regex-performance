@@ -136,11 +136,14 @@ set(INCLUDE_BOOST "system" CACHE STRING "Use boost::regex library form local bui
 set_property(CACHE INCLUDE_BOOST PROPERTY STRINGS "local" "system" "disabled")
 message("-- Include boost: ${INCLUDE_BOOST}")
 if(INCLUDE_BOOST MATCHES "system")
+    # Boost.Regex is located by src/boost.cmake (find_package(Boost) honouring BOOST_ROOT), so a
+    # custom installation prefix does not have to be under vendor/local. Only report the library
+    # that was found on the default search paths.
     find_library(LIB_BOOST boost_regex ${CMAKE_CURRENT_SOURCE_DIR}/local/lib)
-    if(NOT LIB_BOOST)
-        message(FATAL_ERROR "   > Library 'boost_regex' not found on system.\n")
-    else()
+    if(LIB_BOOST)
         message("  > Found boost library: ${LIB_BOOST}\n")
+    else()
+        message("  > boost_regex is resolved by src/boost.cmake (BOOST_ROOT)\n")
     endif()
 endif()
 

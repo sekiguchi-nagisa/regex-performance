@@ -1,17 +1,73 @@
-add_subdirectory(rust)
+set(INCLUDE_RUST "local" CACHE STRING "Use rust regex crate. disabled/other.")
+if(NOT ${INCLUDE_RUST} MATCHES "disabled")
+    add_definitions(-DINCLUDE_RUST)
+    add_subdirectory(rust)
+endif()
 
 # configure files
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/version.h)
 
 set(REGEX_SOURCES
     main.c
-    rust.c
+    memory_tracker.cpp
 )
 
+if(NOT ${INCLUDE_RUST} MATCHES "disabled")
+    set(REGEX_SOURCES ${REGEX_SOURCES} rust.c)
+    set(REGEX_RUSTLIB rregex)
+endif()
+
+# arsh regex engine adapter. The adapter itself (arsh.cpp / arsh.cmake) is maintained outside this
+# repository and copied into src/ by its build script, so the default is "disabled".
+set(INCLUDE_ARSH "disabled" CACHE STRING "Use the arsh regex engine. local/disabled.")
+if(NOT ${INCLUDE_ARSH} MATCHES "disabled")
+    add_definitions(-DINCLUDE_ARSH)
+    set(REGEX_SOURCES ${REGEX_SOURCES} arsh.cpp)
+    set(REGEX_ENGINES ${REGEX_ENGINES} arsh_regex_engine)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/arsh.cmake)
+endif()
+
+# SRELL regex engine adapter (see srell.cmake/srell.cpp).
+set(INCLUDE_SRELL "disabled" CACHE STRING "Use SRELL regex engine. local/disabled.")
+if(NOT ${INCLUDE_SRELL} MATCHES "disabled")
+    add_definitions(-DINCLUDE_SRELL)
+    set(REGEX_SOURCES ${REGEX_SOURCES} srell.cpp)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/srell.cmake)
+endif()
+
+# QuickJS regexp engine adapter (see quickjs.cmake/quickjs.c).
+set(INCLUDE_QUICKJS "disabled" CACHE STRING "Use QuickJS regexp engine. local/disabled.")
+if(NOT ${INCLUDE_QUICKJS} MATCHES "disabled")
+    add_definitions(-DINCLUDE_QUICKJS)
+    set(REGEX_SOURCES ${REGEX_SOURCES} quickjs.c)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/quickjs.cmake)
+endif()
+
+# Hermes regex engine adapter (see hermes.cmake/hermes.cpp).
+# Default is "disabled" because it needs an external Hermes build tree.
+set(INCLUDE_HERMES "disabled" CACHE STRING "Use Hermes regex engine. local/disabled.")
+if(NOT ${INCLUDE_HERMES} MATCHES "disabled")
+    add_definitions(-DINCLUDE_HERMES)
+    set(REGEX_SOURCES ${REGEX_SOURCES} hermes.cpp)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/hermes.cmake)
+endif()
+
+# Node.js regexp engine adapter (see nodejs.cmake/nodejs.cpp).
+# Default is "disabled" because it runs the installed `node` executable out of process.
+set(INCLUDE_NODEJS "disabled" CACHE STRING "Use the Node.js regexp engine. local/disabled.")
+if(NOT ${INCLUDE_NODEJS} MATCHES "disabled")
+    add_definitions(-DINCLUDE_NODEJS)
+    set(REGEX_SOURCES ${REGEX_SOURCES} nodejs.cpp)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/nodejs.cmake)
+endif()
+
+# PCRE2 adapter (see pcre2.cmake/pcre2.c). It links a locally built PCRE2 (with JIT support)
+# and registers the interpreted and JIT engines.
+set(INCLUDE_PCRE2 "disabled" CACHE STRING "Use PCRE2. local/disabled.")
 if(NOT ${INCLUDE_PCRE2} MATCHES "disabled")
     add_definitions(-DINCLUDE_PCRE2)
     set(REGEX_SOURCES ${REGEX_SOURCES} pcre2.c)
-    set(REGEX_ENGINES ${REGEX_ENGINES} pcre2-8)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/pcre2.cmake)
 endif()
 
 if(NOT ${INCLUDE_HYPERSCAN} MATCHES "disabled")
@@ -52,7 +108,7 @@ endif()
 if(NOT ${INCLUDE_BOOST} MATCHES "disabled")
     add_definitions(-DINCLUDE_BOOST)
     set(REGEX_SOURCES ${REGEX_SOURCES} boost.cpp)
-    set(REGEX_ENGINES ${REGEX_ENGINES} boost_regex)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/boost.cmake)
 endif()
 
 if(NOT ${INCLUDE_YARA} MATCHES "disabled")
@@ -76,7 +132,9 @@ endif()
 
 add_executable(regex_perf ${REGEX_SOURCES})
 
-add_dependencies(regex_perf librregex)
+if(TARGET librregex)
+    add_dependencies(regex_perf librregex)
+endif()
 
 # Use CMake to find and link dependencies properly
 set(EXTRA_LIBRARIES "")
@@ -87,4 +145,4 @@ if(NOT ${INCLUDE_RE2} MATCHES "disabled")
     set(EXTRA_LIBRARIES re2::re2)
 endif()
 
-target_link_libraries(regex_perf rregex ${REGEX_ENGINES} ${EXTRA_LIBRARIES} pthread dl)
+target_link_libraries(regex_perf ${REGEX_RUSTLIB} ${REGEX_ENGINES} ${EXTRA_LIBRARIES} pthread dl)

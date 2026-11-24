@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "main.h"
+#include "memory_tracker.h"
 #include <boost/regex.hpp>
 
 
@@ -17,12 +18,18 @@ extern "C" int boost_find_all(char* pattern, char* subject, int subject_len, int
     TIME_TYPE start, end = 0;
     int found = 0;
 
+    memory_tracker_init();
+    const size_t mem_base = memory_tracker_live();
     try {
         boost::regex rx(pattern,boost::regex::optimize );//|boost::regex::extended);
+        res->mem_instance = memory_tracker_live() - mem_base;
         std::string text( subject, subject_len );
 
         double * times = (double*) std::calloc(repeat, sizeof(double));
         int const times_len = repeat;
+
+        memory_tracker_reset_peak();
+        const size_t mem_scan_base = memory_tracker_live();
 
         do {
             GET_TIME(start);
@@ -32,7 +39,7 @@ extern "C" int boost_find_all(char* pattern, char* subject, int subject_len, int
 
         } while (--repeat > 0);
 
-
+        res->mem_runtime = memory_tracker_peak() - mem_scan_base;
         res->matches = found;
         get_mean_and_derivation(times, times_len, res);
 
@@ -41,6 +48,8 @@ extern "C" int boost_find_all(char* pattern, char* subject, int subject_len, int
         res->time = 999999;
         res->time_sd = 0;
         res->matches = 0;
+        res->mem_instance = 0;
+        res->mem_runtime = 0;
     }
 
     return 0;

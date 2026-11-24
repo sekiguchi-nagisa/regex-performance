@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "main.h"
+#include "memory_tracker.h"
 #include <regex>
 #include <iostream>
 
@@ -18,14 +19,20 @@ extern "C" int cppstd_find_all(char* pattern, char* subject, int subject_len, in
     TIME_TYPE start, end = 0;
     int found = 0;
 
+    memory_tracker_init();
+    const size_t mem_base = memory_tracker_live();
     try {
         std::regex rx(pattern,std::regex::optimize);//|std::regex::extended);
+        res->mem_instance = memory_tracker_live() - mem_base;
         std::string text( subject, subject_len );
 
         double * times = (double*) std::calloc(repeat, sizeof(double));
         int const times_len = repeat;
         TIME_TYPE test_start;
         GET_TIME(test_start);
+
+        memory_tracker_reset_peak();
+        const size_t mem_scan_base = memory_tracker_live();
 
         do {
             // Check for timeout before each iteration
@@ -37,7 +44,7 @@ extern "C" int cppstd_find_all(char* pattern, char* subject, int subject_len, in
 
         } while (--repeat > 0);
 
-
+        res->mem_runtime = memory_tracker_peak() - mem_scan_base;
         res->matches = found;
         get_mean_and_derivation(times, times_len, res);
 
@@ -47,6 +54,8 @@ extern "C" int cppstd_find_all(char* pattern, char* subject, int subject_len, in
         res->time = 999999;
         res->time_sd = 0;
         res->matches = 0;
+        res->mem_instance = 0;
+        res->mem_runtime = 0;
     }
 
     return 0;
